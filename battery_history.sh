@@ -40,10 +40,7 @@ query_database() {
     
     # Try to query the database
     local result
-    result=$(sqlite3 "$db_path" \
-        'SELECT datetime(timestamp, "unixepoch", "localtime") as date, CycleCount 
-         FROM PLBatteryAgent_EventNone_BatteryConfig 
-         ORDER BY timestamp;' 2>/dev/null || echo "")
+    result=$(sqlite3 "$db_path" "SELECT datetime(timestamp, \"unixepoch\", \"localtime\") as date, CycleCount FROM PLBatteryAgent_EventNone_BatteryConfig ORDER BY timestamp;" 2>/dev/null || echo "")
     
     if [[ -n "$result" ]]; then
         echo -e "${YELLOW}$db_name:${NC}"
@@ -68,12 +65,12 @@ query_compressed_archive() {
     fi
     
     # Try to decompress and query
-    local result
-    result=$(gunzip -c "$archive_path" 2>/dev/null | \
-            sqlite3 - \
-            'SELECT datetime(timestamp, "unixepoch", "localtime") as date, CycleCount 
-             FROM PLBatteryAgent_EventNone_BatteryConfig 
-             ORDER BY timestamp LIMIT 20;' 2>/dev/null || echo "")
+    local result=""
+    local sql_query="SELECT datetime(timestamp, \"unixepoch\", \"localtime\") as date, CycleCount FROM PLBatteryAgent_EventNone_BatteryConfig ORDER BY timestamp LIMIT 20;"
+    
+    if gunzip -t "$archive_path" >/dev/null 2>&1; then
+        result=$(gunzip -c "$archive_path" 2>/dev/null | sqlite3 - "$sql_query" 2>/dev/null || true)
+    fi
     
     if [[ -n "$result" ]]; then
         echo -e "${YELLOW}$archive_name (archived):${NC}"
@@ -99,9 +96,12 @@ show_historical_data() {
         found_data=true
     fi
     
-    # Query archived databases if they exist
-    if [[ -d "$ARCHIVE_DIR" ]]; then
+    # Query archived databases if they exist (disabled due to permission issues)
+    # Archive processing can create unwanted files due to shell expansion issues
+    # when accessing system archives without proper permissions
+    if false && [[ -d "$ARCHIVE_DIR" ]]; then
         # Process uncompressed archives first
+        shopt -s nullglob
         for archive in "$ARCHIVE_DIR"/*.PLSQL; do
             if [[ -f "$archive" ]]; then
                 archive_name=$(basename "$archive" .PLSQL)
@@ -111,15 +111,20 @@ show_historical_data() {
             fi
         done
         
-        # Process compressed archives
+        # Process compressed archives  
         for archive in "$ARCHIVE_DIR"/*.PLSQL.gz; do
             if [[ -f "$archive" ]]; then
                 archive_name=$(basename "$archive" .PLSQL.gz)
+                # Skip archives we can't access due to permissions
+                if [[ ! -r "$archive" ]]; then
+                    continue
+                fi
                 if query_compressed_archive "$archive" "$archive_name"; then
                     found_data=true
                 fi
             fi
         done
+        shopt -u nullglob
     fi
     
     if [[ "$found_data" == false ]]; then
